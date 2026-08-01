@@ -1,0 +1,143 @@
+import mongoose, { Schema } from "mongoose";
+
+const productSchema = new Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    category: {
+        type: Schema.Types.ObjectId,
+        ref: "Category",
+        required: false
+    },
+    images: {
+        type: [String]
+    },
+    description: {
+        type: String
+    },
+    tags: {
+        type: [String]
+    },
+    rating: {
+        type: Number,
+        default: 0
+    },
+    reviewsCount: {
+        type: Number,
+        default: 0
+    },
+    boughtCount: {
+        type: Number,
+        default: 0
+    },
+    status: {
+        type: String,
+        enum: ["ACTIVE", "INACTIVE"],
+        default: "ACTIVE"
+    }
+}, { timestamps: true });
+
+const productVariantSchema = new mongoose.Schema({
+    productId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Product",
+        required: true,
+        index: true
+    },
+    attributes: {
+        type: Map,
+        of: String,
+        default: {}
+    },
+    images: {
+        type: [String]
+    },
+    mrp: {
+        type: Number,
+        required: true,
+        min: 0
+    },
+    price: {
+        type: Number,
+        required: true,
+        min: 0,
+        validate: {
+            validator: function (value) {
+                return value <= this.mrp;
+            },
+            message: "Price cannot be greater than MRP."
+        }
+    },
+    stock: {
+        type: Number,
+        required: true,
+        default: 0,
+        min: 0
+    }
+}, { timestamps: true });
+
+productVariantSchema.virtual("discountPercentage").get(function () {
+    if (this.mrp === 0) return 0;
+    return Math.round(((this.mrp - this.price) / this.mrp) * 100);
+});
+
+productVariantSchema.virtual("discountAmount").get(function () {
+    return this.mrp - this.price;
+});
+
+productVariantSchema.set("toJSON", { virtuals: true });
+productVariantSchema.set("toObject", { virtuals: true });
+
+
+
+const reviewSchema = new mongoose.Schema({
+    productId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Product",
+        required: true
+    },
+
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true
+    },
+
+    rating: {
+        type: Number,
+        required: true,
+        min: 1,
+        max: 5
+    },
+
+    review: {
+        type: String,
+        trim: true
+    },
+
+    images: [String],
+
+    isActive: {
+        type: Boolean,
+        default: true
+    }
+
+}, { timestamps: true });
+
+reviewSchema.index(
+    {
+        productId: 1,
+        userId: 1
+    },
+    {
+        unique: true
+    }
+);
+
+export const ProductModel = mongoose.model("Product", productSchema);
+
+export const ProductVariantModel = mongoose.model("ProductVariant", productVariantSchema);
+
+export const ProductReviewModel = mongoose.model("Review", reviewSchema);
