@@ -63,9 +63,11 @@ export const createOrder = asyncHandler(async (req, res) => {
         paymentStatus: "Pending"
     });
 
-    // Update stock and bought count
+    // Update stock and bought count (Product-wise stock)
     for (const item of normalizedItems) {
 
+        // Variant-wise stock update (Commented: stock is now managed at product level)
+        /*
         if (item.variantId) {
 
             await ProductVariantModel.findByIdAndUpdate(
@@ -77,11 +79,14 @@ export const createOrder = asyncHandler(async (req, res) => {
                 }
             );
         }
+        */
 
+        // Deduct stock and update bought count directly on ProductModel
         await ProductModel.findByIdAndUpdate(
             item.productId,
             {
                 $inc: {
+                    stock: -item.quantity,
                     boughtCount: item.quantity
                 }
             }

@@ -13,10 +13,10 @@ const router = express.Router();
 
 router.route('/')
     .post(verifyJWT, upload.single('image'), createCategory)
-    .get(verifyJWT, getAllCategories);
+    .get(getAllCategories);
 
 router.route('/:id')
-    .get(verifyJWT, getCategoryById)
+    .get(getCategoryById)
     .patch(verifyJWT, upload.single('image'), updateCategory)
     .delete(verifyJWT, deleteCategory);
 

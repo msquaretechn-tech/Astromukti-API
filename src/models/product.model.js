@@ -1,5 +1,55 @@
 import mongoose, { Schema } from "mongoose";
 
+const productFaqSchema = new Schema({
+    question: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    answer: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    sortOrder: {
+        type: Number,
+        default: 0
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    type: {
+        type: String,
+        default: 'faq'
+    }
+}, { _id: true });
+
+const productBannerSchema = new Schema({
+    image: {
+        type: String,
+        required: true
+    },
+    title: {
+        type: String,
+        trim: true,
+        default: ""
+    },
+    linkUrl: {
+        type: String,
+        trim: true,
+        default: ""
+    },
+    sortOrder: {
+        type: Number,
+        default: 0
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    }
+}, { _id: true });
+
 const productSchema = new Schema({
     name: {
         type: String,
@@ -32,11 +82,39 @@ const productSchema = new Schema({
         type: Number,
         default: 0
     },
+    stock: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
     status: {
         type: String,
         enum: ["ACTIVE", "INACTIVE"],
         default: "ACTIVE"
-    }
+    },
+    faqs: [productFaqSchema],
+    benefits: [productFaqSchema],
+    banners: [productBannerSchema],
+    url: {
+        type: String,
+        trim: true
+    },
+    metaTitle: {
+        type: String,
+        trim: true
+    },
+    metaDescription: {
+        type: String,
+        trim: true
+    },
+    faqDescription: {
+        type: String,
+        trim: true
+    },
+    pageDescription: {
+        type: String,
+        trim: true
+    },
 }, { timestamps: true });
 
 const productVariantSchema = new mongoose.Schema({
@@ -70,9 +148,10 @@ const productVariantSchema = new mongoose.Schema({
             message: "Price cannot be greater than MRP."
         }
     },
+    // Variant-wise stock (Commented out in favor of product-wise stock)
     stock: {
         type: Number,
-        required: true,
+        required: false,
         default: 0,
         min: 0
     }

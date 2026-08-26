@@ -4,6 +4,26 @@ import { generateChatToken, generateRtcToken } from "./services/AgoraTokenGenera
 import { generateAccessToken, sendNotification } from "./services/FirebaseFcmService.js";
 
 const app = express();
+import cors from "cors";
+
+const allowedOrigins = [
+    "https://www.astromukti.com",
+    "https://astromukti.com",
+];
+
+app.use(cors({
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error("Not allowed by CORS"));
+        }
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false
+}));
+
 
 // middlewares
 app.use(express.json({ limit: "16mb" }));

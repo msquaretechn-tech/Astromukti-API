@@ -7,7 +7,7 @@ import path from "path";
 
 // Create Product
 export const createProduct = asyncHandler(async (req, res) => {
-    const { name, description, category, tags } = req.body;
+    const { name, description, category, tags, url, seoUrl, metaTitle, metaDescription, faqDescription, pageDescription } = req.body;
 
     let images = [];
 
@@ -15,12 +15,38 @@ export const createProduct = asyncHandler(async (req, res) => {
         images = req.files.map(file => file.filename);
     }
 
+    let faqs = [];
+    if (req.body.faqs) {
+        faqs = typeof req.body.faqs === "string" ? JSON.parse(req.body.faqs) : req.body.faqs;
+    }
+
+    let banners = [];
+    if (req.body.banners) {
+        banners = typeof req.body.banners === "string" ? JSON.parse(req.body.banners) : req.body.banners;
+    }
+
+    let stock = 0;
+    if (req.body.stock !== undefined && req.body.stock !== null && req.body.stock !== "") {
+        const parsedStock = Number(req.body.stock);
+        if (!isNaN(parsedStock)) {
+            stock = parsedStock;
+        }
+    }
+
     const product = await ProductModel.create({
         name,
         description,
         category,
-        tags: tags.split(",").map(tag => tag.trim()),
-        images
+        stock,
+        tags: tags ? (Array.isArray(tags) ? tags : tags.split(",").map(tag => tag.trim())) : [],
+        images,
+        faqs,
+        banners,
+        url: seoUrl || url,
+        metaTitle,
+        metaDescription,
+        faqDescription,
+        pageDescription
     });
 
     let variants = JSON.parse(req.body.variants);
@@ -37,7 +63,8 @@ export const createProduct = asyncHandler(async (req, res) => {
 
         discount: item.discount,
 
-        stock: item.stock
+        // Variant-wise stock (Commented: stock is now managed at product level)
+        // stock: item.stock
 
     }));
 
@@ -67,7 +94,10 @@ export const getAllProducts = asyncHandler(async (req, res) => {
         };
     }
 
-    const products = await ProductModel.find(query).lean();
+    const products = await ProductModel.find(query)
+        .populate("category", "name")
+        // .sort({ createdAt: -1 })
+        .lean();
 
     const productIds = products.map((item) => item._id);
 
@@ -96,7 +126,7 @@ export const getAllProducts = asyncHandler(async (req, res) => {
 // Get Product By ID
 export const getProductById = asyncHandler(async (req, res) => {
 
-    const product = await ProductModel.findById(req.params.id);
+    const product = await ProductModel.findById(req.params.id).populate("category", "name");
 
     if (!product) {
         throw new ApiError(404, "Product not found");
@@ -115,7 +145,7 @@ export const getProductById = asyncHandler(async (req, res) => {
 // Update Product
 export const updateProduct = asyncHandler(async (req, res) => {
 
-    const { name, description, category, tags, status } = req.body;
+    const { name, description, category, tags, status, url, seoUrl, metaTitle, metaDescription, faqDescription, pageDescription } = req.body;
 
     const product = await ProductModel.findById(req.params.id);
 
@@ -131,6 +161,30 @@ export const updateProduct = asyncHandler(async (req, res) => {
     if (description) updateData.description = description;
     if (category) updateData.category = category;
     if (status) updateData.status = status;
+
+    if (req.body.stock !== undefined && req.body.stock !== null && req.body.stock !== "") {
+        const parsedStock = Number(req.body.stock);
+        if (!isNaN(parsedStock)) {
+            updateData.stock = parsedStock;
+        }
+    }
+
+    // SEO / Meta fields
+    if (seoUrl !== undefined) updateData.url = seoUrl;
+    else if (url !== undefined) updateData.url = url;
+
+    if (metaTitle !== undefined) updateData.metaTitle = metaTitle;
+    if (metaDescription !== undefined) updateData.metaDescription = metaDescription;
+    if (faqDescription !== undefined) updateData.faqDescription = faqDescription;
+    if (pageDescription !== undefined) updateData.pageDescription = pageDescription;
+
+    if (req.body.faqs !== undefined) {
+        updateData.faqs = typeof req.body.faqs === "string" ? JSON.parse(req.body.faqs) : req.body.faqs;
+    }
+
+    if (req.body.banners !== undefined) {
+        updateData.banners = typeof req.body.banners === "string" ? JSON.parse(req.body.banners) : req.body.banners;
+    }
 
 
     // Update tags
@@ -206,9 +260,10 @@ export const updateProductVariant = asyncHandler(async (req, res) => {
         variant.price = Number(req.body.price);
     }
 
-    if (req.body.stock !== undefined) {
-        variant.stock = Number(req.body.stock);
-    }
+    // Variant-wise stock update (Commented: stock is now managed at product level)
+    // if (req.body.stock !== undefined) {
+    //     variant.stock = Number(req.body.stock);
+    // }
 
 
     if (req.files?.length) {
@@ -295,7 +350,7 @@ export const createReview = asyncHandler(async (req, res) => {
 
     const { rating, review } = req.body;
 
-    const userId = req.auth._id;
+    const userId = req.auth?._id || req.body.userId;
     const productId = req.params.productId;
 
     const product = await ProductModel.findById(productId);
@@ -350,19 +405,310 @@ export const getProductReviews = asyncHandler(async (req, res) => {
 
 
 export const getRelatedProducts = asyncHandler(async (req, res) => {
-
     const product = await ProductModel.findById(req.params.productId);
 
     if (!product) {
         throw new ApiError(404, "Product not found");
     }
 
-    const products = await ProductModel.find({
+    const query = {
         _id: { $ne: product._id },
-        // category: product.category,
         status: "ACTIVE"
-    }).limit(8);
+    };
 
-    return res.status(200).json(new ApiResponse(200, products, "Related products"));
+    if (product.category) {
+        query.category = product.category;
+    }
 
+    let products = await ProductModel.find(query).lean().limit(8);
+
+    // Fallback if no products in the same category
+    if (products.length === 0) {
+        products = await ProductModel.find({
+            _id: { $ne: product._id },
+            status: "ACTIVE"
+        }).lean().limit(8);
+    }
+
+    const productIds = products.map((item) => item._id);
+
+    const variants = await ProductVariantModel.find({
+        productId: { $in: productIds },
+    }).lean();
+
+    const variantMap = {};
+    variants.forEach((variant) => {
+        if (!variantMap[variant.productId]) {
+            variantMap[variant.productId] = [];
+        }
+        variantMap[variant.productId].push(variant);
+    });
+
+    const response = products.map((item) => ({
+        ...item,
+        variants: variantMap[item._id] || [],
+    }));
+
+    return res.status(200).json(new ApiResponse(200, response, "Related products"));
+});
+
+// --- Product Banner Controllers ---
+export const addProductBanner = asyncHandler(async (req, res) => {
+    const { productId } = req.params;
+    const { linkUrl, sortOrder, isActive, title } = req.body;
+
+    const image = req.file ? req.file.filename : req.body.image;
+
+    if (!image) {
+        throw new ApiError(400, "Banner image is required");
+    }
+
+    const product = await ProductModel.findById(productId);
+    if (!product) {
+        throw new ApiError(404, "Product not found");
+    }
+
+    const newBanner = {
+        image,
+        title: title || "",
+        linkUrl: linkUrl || "",
+        sortOrder: sortOrder !== undefined ? Number(sortOrder) : 0,
+        isActive: isActive !== undefined ? (isActive === true || isActive === "true") : true
+    };
+
+    product.banners.push(newBanner);
+    await product.save();
+
+    return res.status(201).json(new ApiResponse(201, product.banners, "Product banner added successfully"));
+});
+
+export const updateProductBanner = asyncHandler(async (req, res) => {
+    const { productId, bannerId } = req.params;
+    const { linkUrl, sortOrder, isActive, title } = req.body;
+
+    const product = await ProductModel.findById(productId);
+    if (!product) {
+        throw new ApiError(404, "Product not found");
+    }
+
+    const banner = product.banners.id(bannerId);
+    if (!banner) {
+        throw new ApiError(404, "Banner not found");
+    }
+
+    if (req.file) {
+        // Delete old image if it exists
+        if (banner.image) {
+            const oldPath = path.join(process.cwd(), "public/images", banner.image);
+            if (fs.existsSync(oldPath)) {
+                fs.unlinkSync(oldPath);
+            }
+        }
+        banner.image = req.file.filename;
+    } else if (req.body.image) {
+        banner.image = req.body.image;
+    }
+
+    if (linkUrl !== undefined) banner.linkUrl = linkUrl;
+    if (title !== undefined) banner.title = title;
+    if (sortOrder !== undefined) banner.sortOrder = Number(sortOrder);
+    if (isActive !== undefined) banner.isActive = (isActive === true || isActive === "true");
+
+    await product.save();
+
+    return res.status(200).json(new ApiResponse(200, product.banners, "Product banner updated successfully"));
+});
+
+export const deleteProductBanner = asyncHandler(async (req, res) => {
+    const { productId, bannerId } = req.params;
+
+    const product = await ProductModel.findById(productId);
+    if (!product) {
+        throw new ApiError(404, "Product not found");
+    }
+
+    const banner = product.banners.id(bannerId);
+    if (!banner) {
+        throw new ApiError(404, "Banner not found");
+    }
+
+    if (banner.image) {
+        const imagePath = path.join(process.cwd(), "public/images", banner.image);
+        if (fs.existsSync(imagePath)) {
+            fs.unlinkSync(imagePath);
+        }
+    }
+
+    product.banners.pull(bannerId);
+    await product.save();
+
+    return res.status(200).json(new ApiResponse(200, product.banners, "Product banner deleted successfully"));
+});
+
+// --- Product FAQ Controllers ---
+
+export const addProductFaq = asyncHandler(async (req, res) => {
+    const { productId } = req.params;
+    const { question, answer, sortOrder, isActive, type } = req.body;
+
+    if (!question || !answer) {
+        throw new ApiError(400, "Question and Answer are required");
+    }
+
+    const product = await ProductModel.findById(productId);
+    if (!product) {
+        throw new ApiError(404, "Product not found");
+    }
+
+    const newFaq = {
+        question,
+        answer,
+        type: type ?? "faq",
+        sortOrder: sortOrder !== undefined ? Number(sortOrder) : 0,
+        isActive: isActive !== undefined ? (isActive === true || isActive === "true") : true
+    };
+
+    if (type == 'benefits') {
+        product.benefits.push(newFaq);
+    } else {
+        product.faqs.push(newFaq);
+    }
+
+    await product.save();
+
+    const collection = type === "benefits" ? product.benefits : product.faqs;
+
+    return res.status(201).json(
+        new ApiResponse(
+            201,
+            collection,
+            `${type === "benefits" ? "Benefit" : "FAQ"} added successfully`
+        )
+    );
+});
+
+export const updateProductFaq = asyncHandler(async (req, res) => {
+    const { productId, faqId } = req.params;
+    const { question, answer, sortOrder, isActive, type } = req.body;
+
+    const product = await ProductModel.findById(productId);
+    if (!product) {
+        throw new ApiError(404, "Product not found");
+    }
+
+    const collection = type === "benefits" ? product.benefits : product.faqs;
+
+    const item = collection.id(faqId);
+    if (!item) {
+        throw new ApiError(404, `${type === "benefits" ? "Benefit" : "FAQ"} not found`);
+    }
+
+    if (question !== undefined) item.question = question;
+    if (answer !== undefined) item.answer = answer;
+    if (sortOrder !== undefined) item.sortOrder = Number(sortOrder);
+    if (isActive !== undefined)
+        item.isActive = isActive === true || isActive === "true";
+
+    await product.save();
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            collection,
+            `${type === "benefits" ? "Benefit" : "FAQ"} updated successfully`
+        )
+    );
+});
+
+export const deleteProductFaq = asyncHandler(async (req, res) => {
+    const { productId, faqId } = req.params;
+    const { type } = req.body; // or req.query.type
+
+    const product = await ProductModel.findById(productId);
+    if (!product) {
+        throw new ApiError(404, "Product not found");
+    }
+
+    const collection = type === "benefits" ? product.benefits : product.faqs;
+
+    const item = collection.id(faqId);
+    if (!item) {
+        throw new ApiError(404, `${type === "benefits" ? "Benefit" : "FAQ"} not found`);
+    }
+
+    collection.pull(faqId);
+
+    await product.save();
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            collection,
+            `${type === "benefits" ? "Benefit" : "FAQ"} deleted successfully`
+        )
+    );
+});
+
+// Reorder Product Images
+export const reorderProductImages = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { images } = req.body;
+
+    let imageList = images;
+    if (typeof images === "string") {
+        try {
+            imageList = JSON.parse(images);
+        } catch {
+            imageList = [images];
+        }
+    }
+
+    if (!Array.isArray(imageList)) {
+        throw new ApiError(400, "Images must be an array of image filenames");
+    }
+
+    const product = await ProductModel.findById(id);
+    if (!product) {
+        throw new ApiError(404, "Product not found");
+    }
+
+    product.images = imageList;
+    await product.save();
+
+    return res.status(200).json(
+        new ApiResponse(200, product, "Product images reordered successfully")
+    );
+});
+
+// Delete Single Product Image
+export const deleteProductImage = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { imageName } = req.body;
+
+    if (!imageName) {
+        throw new ApiError(400, "Image name is required");
+    }
+
+    const product = await ProductModel.findById(id);
+    if (!product) {
+        throw new ApiError(404, "Product not found");
+    }
+
+    if (!product.images?.includes(imageName)) {
+        throw new ApiError(404, "Image not found in product");
+    }
+
+    // 1. Remove image filename from product.images array
+    product.images = product.images.filter(img => img !== imageName);
+    await product.save();
+
+    // 2. Delete file from server disk
+    const filePath = path.join(process.cwd(), "public/images", imageName);
+    if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+    }
+
+    return res.status(200).json(
+        new ApiResponse(200, product, "Product image deleted successfully")
+    );
 });
