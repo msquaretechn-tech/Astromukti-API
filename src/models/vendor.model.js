@@ -167,6 +167,14 @@ const vendorSchema = new Schema({
         type: Boolean,
         default: true
     },
+    // Set while a server-tracked call session is ringing/ongoing for this
+    // vendor, cleared the moment it ends. Doubles as a lock preventing a
+    // second call from being started against a vendor already on one.
+    activeCallSessionId: {
+        type: Schema.Types.ObjectId,
+        ref: "CallSession",
+        default: null,
+    },
     nextUpComingTime: {
         type: Date,
     },

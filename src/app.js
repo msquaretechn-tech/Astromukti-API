@@ -53,6 +53,7 @@ import couponRouter from "./routes/coupon.routes.js"
 import cartRouter from "./routes/cart.routes.js"
 import enquiryRouter from "./routes/enquiry.routes.js"
 import appSettingsRouter from "./routes/appSettings.routes.js"
+import callRouter from "./routes/call.routes.js"
 import { makePaymentWithWebhook } from "./services/PaymentWebhookService.js";
 
 
@@ -79,6 +80,7 @@ app.use('/api/coupon', couponRouter)
 app.use('/api/cart', cartRouter)
 app.use('/api/enquiry', enquiryRouter)
 app.use('/api/settings', appSettingsRouter)
+app.use('/api/call', callRouter)
 
 
 

@@ -1,7 +1,30 @@
 import agoraToken from 'agora-token';
 const { RtcTokenBuilder, RtcRole, ChatTokenBuilder, RtmTokenBuilder } = agoraToken;
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
 import https from 'https';
+
+// Mints an RTC token using the server's own Agora credentials (AGORA_APP_ID/
+// AGORA_APP_CERTIFICATE in .env). Used by /api/call/* - unlike the legacy
+// generateRtcToken handler below, which still takes appId/appCertificate
+// from the client (see AstroMukti-FINDINGS.md M3, left untouched here),
+// this never trusts the caller for the certificate.
+export function mintRtcToken({ channelName, uid, role = "publisher", tokenType = "uid", expireSeconds = 3600 }) {
+    const appId = process.env.AGORA_APP_ID;
+    const appCertificate = process.env.AGORA_APP_CERTIFICATE;
+    if (!appId || !appCertificate) {
+        throw new ApiError(500, "Agora calling is not configured on the server");
+    }
+
+    const rtcRole = role === "audience" ? RtcRole.SUBSCRIBER : RtcRole.PUBLISHER;
+    const currentTime = Math.floor(Date.now() / 1000);
+    const privilegeExpireTime = currentTime + expireSeconds;
+
+    if (tokenType === "userAccount") {
+        return RtcTokenBuilder.buildTokenWithUserAccount(appId, appCertificate, channelName, uid, rtcRole, privilegeExpireTime);
+    }
+    return RtcTokenBuilder.buildTokenWithUid(appId, appCertificate, channelName, uid, rtcRole, privilegeExpireTime);
+}
 
 /// RTC Token for CALL ( VIDEO/AUDIO )
 export const generateRtcToken = asyncHandler(async (req, res) => {

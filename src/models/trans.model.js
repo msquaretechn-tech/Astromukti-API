@@ -30,6 +30,17 @@ const transactionSchema = new Schema({
     amount: {
         type: Number,
         required: true
+    },
+    // Links a transaction to the server-tracked call session that produced
+    // it. Unique + sparse: only call-billed transactions set this, and the
+    // uniqueness is what makes billing a session idempotent - the first
+    // writer wins, everyone else (a retried /end, the legacy client report)
+    // gets the same existing row back instead of a second charge.
+    callSessionId: {
+        type: Schema.Types.ObjectId,
+        ref: "CallSession",
+        unique: true,
+        sparse: true,
     }
 
 }, { timestamps: true });

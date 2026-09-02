@@ -3,6 +3,7 @@ import connectDB from "./config/db.config.js";
 import dotenv from "dotenv";
 import os from 'os';
 import cluster from "cluster";
+import { registerJobs } from "./jobs/index.js";
 dotenv.config();
 
 const port = process.env.PORT;
@@ -18,6 +19,7 @@ connectDB()
         // } else {
         app.listen(process.env.PORT, () => {
             console.log(` ⚙️  Server is running at port : http://localhost:${port} Process Id : ${process.pid}`);
+            registerJobs();
         })
         // }
     })

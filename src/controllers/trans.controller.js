@@ -5,7 +5,9 @@ import { RemedyModel, GiftTransactionModel, TransactionModel, WithdrawTransactio
 import mongoose from 'mongoose';
 import { User } from '../models/user.model.js';
 import { Vendor } from '../models/vendor.model.js';
+import { CallSession } from '../models/callSession.model.js';
 import { logToFile } from '../utils/logger.js';
+import { billCallSession } from '../services/CallBilling.js';
 
 
 // Create Transaction
@@ -18,7 +20,42 @@ export const createTransaction = asyncHandler(async (req, res) => {
         "unknown";
 
     const { userId } = req.query;
-    const { vendorId, type, duration, disconnectedBy, isConnected } = req.body;
+    const { vendorId, type, disconnectedBy, isConnected } = req.body;
+    let { duration } = req.body;
+
+    // When the client reports which CallSession this billing is for, use the
+    // server's own computed duration instead of the client-reported one -
+    // durationSeconds is authoritative (derived from startedAt/lastHeartbeatAt
+    // on the server), not something the app can misreport. channelId is only
+    // sent by app builds updated to use /api/call/* - older installs keep
+    // hitting the legacy path below unchanged.
+    const { channelId } = req.body;
+    let callSession = null;
+    if (channelId) {
+        callSession = await CallSession.findOne({ channelId });
+        if (!callSession) {
+            throw new ApiError(404, "Call session not found");
+        }
+        if (callSession.userId.toString() !== userId) {
+            throw new ApiError(403, "You are not a part of this call session");
+        }
+
+        // Check for an already-recorded transaction before touching any wallet
+        // balance, so a retry (e.g. the client not seeing the first response)
+        // can't double-bill. The unique index on callSessionId below is a
+        // backstop for the narrow window where two requests race past this
+        // check concurrently, not the primary guard.
+        const existingForSession = await TransactionModel.findOne({ callSessionId: callSession._id });
+        if (existingForSession) {
+            logToFile(`🟡 DUPLICATE BILLING PREVENTED (pre-check) | session=${callSession._id}, existingTx=${existingForSession._id}`, "trans");
+            return res.json(new ApiResponse(200, existingForSession, "Transaction already recorded for this call"));
+        }
+
+        duration = callSession.durationSeconds / 60;
+        logToFile(`🔵 USING CALLSESSION DURATION | session=${callSession._id}, durationSeconds=${callSession.durationSeconds}`, "trans");
+    } else {
+        logToFile(`🟡 LEGACY DURATION | no channelId supplied, trusting client-reported duration=${duration}`, "trans");
+    }
 
     logToFile(
         `🟢 START | user=${userId}, vendor=${vendorId}, ip=${clientIp}, type=${type}, duration=${duration}, isConnected=${isConnected}, disconnectedBy=${disconnectedBy}`,
@@ -63,6 +100,28 @@ export const createTransaction = asyncHandler(async (req, res) => {
     }
 
     logToFile(`🔵 STATUS RESOLVED | status=${status}`, "trans");
+
+    // When this billing is for a tracked CallSession and the client agrees
+    // it actually connected, delegate to the exact same billing logic
+    // endCall already runs the moment the session completes - this call
+    // almost always just finds that transaction already made and returns
+    // it, rather than being the only thing billing depends on. The legacy
+    // path below (no channelId) and the dropped/failed cases are untouched.
+    if (callSession && status === "success") {
+        const billing = await billCallSession(callSession, { source: "createTransaction" });
+        if (billing.transaction) {
+            const message = billing.alreadyBilled
+                ? "Transaction already recorded for this call"
+                : "Transaction completed successfully";
+            return res.json(new ApiResponse(200, billing.transaction, message));
+        }
+        if (billing.reason === "user_or_vendor_not_found") {
+            throw new ApiError(400, "User or vendor not found");
+        }
+        // session_not_billable - the client is reporting a connected call
+        // for a session the server hasn't marked ended yet.
+        throw new ApiError(409, "This call session has not ended yet");
+    }
 
     // ================= RATE =================
 
