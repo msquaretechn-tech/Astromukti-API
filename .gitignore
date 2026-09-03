@@ -74,6 +74,10 @@ web_modules/
 .env.test
 .env.production
 
+# Firebase / GCP service-account key files (never commit real credentials)
+*firebase-adminsdk*.json
+*-service-account*.json
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

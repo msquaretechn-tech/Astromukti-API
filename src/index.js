@@ -1,10 +1,9 @@
+import "dotenv/config";
 import app from "./app.js";
 import connectDB from "./config/db.config.js";
-import dotenv from "dotenv";
 import os from 'os';
 import cluster from "cluster";
 import { registerJobs } from "./jobs/index.js";
-dotenv.config();
 
 const port = process.env.PORT;
 
