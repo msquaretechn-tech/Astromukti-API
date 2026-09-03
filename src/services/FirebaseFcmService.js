@@ -72,141 +72,95 @@ export const sendNotification = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Either fcmToken or topic is required")
     }
 
+    const accessToken = await getAccessToken();
 
-    const jwtClient = new JWT({
-        email: key.client_email,
-        key: key.private_key,
-        scopes: SCOPES
-    });
-    jwtClient.authorize(async function (err, tokens) {
-        if (err) {
+    const uri = 'https://fcm.googleapis.com/v1/projects/jyotish-49331/messages:send';
 
-            console.log(err);
+    const targetField = fcmToken ? { token: fcmToken } : { topic: topic };
 
-
-            throw new ApiError(401, err)
-
-        }
-        // const accessToken = tokens.access_token;
-
-        const accessToken = await getAccessToken();
-
-        const uri = 'https://fcm.googleapis.com/v1/projects/jyotish-49331/messages:send';
-
-
-        const targetField = fcmToken ? { token: fcmToken } : { topic: topic };
-
-
-        fetch(uri, {
-            method: "POST",
-            body: JSON.stringify({
-                message: {
-                    ...targetField,
+    const response = await fetch(uri, {
+        method: "POST",
+        body: JSON.stringify({
+            message: {
+                ...targetField,
+                notification: {
+                    body: body,
+                    title: title
+                },
+                android: {
+                    priority: "high",
                     notification: {
-                        body: body,
-                        title: title
+                        "channel_id": channel_id,
+                        "sound": sound,
+                    }
+                },
+                apns: {
+                    headers: {
+                        "apns-priority": "10"
                     },
-                    android: {
-                        priority: "high",
-                        notification: {
-                            "channel_id": channel_id,
+                    payload: {
+                        aps: {
                             "sound": sound,
                         }
-                    },
-                    apns: {
-                        headers: {
-                            "apns-priority": "10"
-                        },
-                        payload: {
-                            aps: {
-                                "sound": sound,
-                            }
-                        }
-                    },
-                    data: {
-                        ...data,
-                        title: title,   // ✅ always included
-                        body: body      // ✅ always included
-                    },
-                }
-            }),
-            headers: {
-                "Content-type": "application/json",
-                "Authorization": `Bearer ${accessToken}`
+                    }
+                },
+                data: {
+                    ...data,
+                    title: title,   // ✅ always included
+                    body: body      // ✅ always included
+                },
             }
-        })
-
-            // Converting to JSON 
-            .then(response => response.json())
-            // Displaying results to console 
-            .then((json) => {
-                res.json(json)
-            });
-
+        }),
+        headers: {
+            "Content-type": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+        }
     });
+
+    const json = await response.json();
+    return res.json(json);
 })
 
 
 export const sendFcmNotification = async (fcmToken, body, title, data) => {
+    const accessToken = await getAccessToken();
 
-    const jwtClient = new JWT({
-        email: key.client_email,
-        key: key.private_key,
-        scopes: SCOPES
+    const uri = 'https://fcm.googleapis.com/v1/projects/jyotish-49331/messages:send';
+
+    const response = await fetch(uri, {
+        method: "POST",
+        body: JSON.stringify({
+            message: {
+                token: fcmToken,
+                notification: {
+                    body: body,
+                    title: title
+                },
+                android: {
+                    priority: "high",
+                    notification: {
+                        sound: "default"
+                    }
+                },
+                apns: {
+                    headers: {
+                        "apns-priority": "10"
+                    },
+                    payload: {
+
+                        aps: {
+                            sound: "default"
+                        }
+                    }
+                },
+                data: data // Optional: { type: "chat", chatroomId: "123" }
+            }
+        }),
+        headers: {
+            "Content-type": "application/json",
+            "Authorization": `Bearer ${accessToken}`
+        }
     });
 
-    return new Promise((resolve, reject) => {
-        jwtClient.authorize(function (err, tokens) {
-            if (err) {
-                reject(err);
-                throw new ApiError(401, err)
-            }
-
-            const accessToken = tokens.access_token;
-
-            const uri = 'https://fcm.googleapis.com/v1/projects/jyotish-49331/messages:send';
-
-            fetch(uri, {
-                method: "POST",
-                body: JSON.stringify({
-                    message: {
-                        token: fcmToken,
-                        notification: {
-                            body: body,
-                            title: title
-                        },
-                        android: {
-                            priority: "high",
-                            notification: {
-                                sound: "default"
-                            }
-                        },
-                        apns: {
-                            headers: {
-                                "apns-priority": "10"
-                            },
-                            payload: {
-
-                                aps: {
-                                    sound: "default"
-                                }
-                            }
-                        },
-                        data: data // Optional: { type: "chat", chatroomId: "123" }
-                    }
-                }),
-                headers: {
-                    "Content-type": "application/json",
-                    "Authorization": `Bearer ${accessToken}`
-                }
-            })
-
-                // Converting to JSON
-                .then(response => response.json())
-                // Displaying results to console
-                .then((json) => {
-                    resolve(json)
-                });
-        });
-    })
+    return response.json();
 }
