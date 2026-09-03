@@ -201,10 +201,10 @@ export const getVendor = asyncHandler(async (req, res) => {
 
     if (search) {
         filter = {
-            name: {
-                $regex: search,
-                $options: "i"
-            }
+            $or: [
+                { name: { $regex: search, $options: "i" } },
+                { lastName: { $regex: search, $options: "i" } }
+            ]
         }
     }
 
