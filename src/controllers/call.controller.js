@@ -150,7 +150,7 @@ export const heartbeat = asyncHandler(async (req, res) => {
     const { channelId } = req.params;
 
     const session = await CallSession.findOne({ channelId }).select(
-        "channelId userId vendorId type status startedAt lastHeartbeatAt rateSnapshot"
+        "channelId userId vendorId type status startedAt lastHeartbeatAt rateSnapshot heartbeatCount"
     );
     if (!session) {
         throw new ApiError(404, "Call session not found");
