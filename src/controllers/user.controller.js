@@ -45,6 +45,9 @@ export const addUser = asyncHandler(async (req, res) => {
         const newUser = new User({
             uid, name, lastName, mobile, email, password, gender, dob: dob,
             dobTime: dobTime, birthPlace, currentAddress, avatar, deviceId,
+            // New-user promo: 5 minutes free across chat/call/video, granted
+            // once at signup only - never backfilled onto existing users.
+            freeMinutesRemaining: 5,
         });
 
         // Save the user to the database

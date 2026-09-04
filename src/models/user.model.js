@@ -62,6 +62,15 @@ const userSchema = new Schema({
         type: Number,
         default: 0
     },
+    // Minutes-based new-user promo, shared across chat/call/video - kept
+    // separate from walletAmount since astrologers charge different
+    // per-minute rates, so a flat rupee credit can't represent "5 minutes"
+    // uniformly. Granted only at signup (see addUser); existing users
+    // default to 0 and are unaffected.
+    freeMinutesRemaining: {
+        type: Number,
+        default: 0
+    },
     isBlocked: {
         type: Boolean,
         default: false

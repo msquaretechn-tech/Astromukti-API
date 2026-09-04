@@ -66,7 +66,7 @@ export const createTransaction = asyncHandler(async (req, res) => {
 
     console.log(userId);
 
-    const user = await User.findById(userId, { walletAmount: 1 });
+    const user = await User.findById(userId, { walletAmount: 1, freeMinutesRemaining: 1 });
 
     console.log(user);
 
@@ -134,6 +134,15 @@ export const createTransaction = asyncHandler(async (req, res) => {
 
     const minTime = Math.max(1, Math.ceil(duration));
 
+    // New-user promo: 5 free minutes shared across chat/call/video, applied
+    // before any rate math - the astrologer isn't paid for this portion, so
+    // it's simplest to just shrink the billable minute count up front. This
+    // is separate from (and unrelated to) the freePromoAmount reads/writes
+    // below, which are pre-existing dead code (see AstroMukti-FINDINGS.md M6)
+    // left untouched.
+    const freeMinutesApplied = Math.min(minTime, Number(user.freeMinutesRemaining) || 0);
+    const billableMinutes = minTime - freeMinutesApplied;
+
     // ================= AMOUNTS =================
 
     const walletAmount = Number(user.walletAmount);
@@ -141,9 +150,9 @@ export const createTransaction = asyncHandler(async (req, res) => {
 
 
     let usableFreeAmount = 0;
-    let finalDeduction = minTime * currentRate;
+    let finalDeduction = billableMinutes * currentRate;
     let description = "";
-    const minAmount = currentRate * minTime;
+    const minAmount = currentRate * billableMinutes;
 
     logToFile(
         `🔵 BILLING INPUT | rate=${currentRate}, minTime=${minTime}, wallet=${walletAmount}, freePromo=${freePromoAmount}`,
@@ -192,7 +201,8 @@ export const createTransaction = asyncHandler(async (req, res) => {
 
         await User.findByIdAndUpdate(userId, {
             walletAmount: Math.max(0, walletAmount - finalDeduction).toFixed(2),
-            freePromoAmount: Math.max(0, freePromoAmount - usableFreeAmount).toFixed(2)
+            freePromoAmount: Math.max(0, freePromoAmount - usableFreeAmount).toFixed(2),
+            freeMinutesRemaining: (Number(user.freeMinutesRemaining) || 0) - freeMinutesApplied,
         });
 
         logToFile(

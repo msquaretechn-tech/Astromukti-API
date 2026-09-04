@@ -87,7 +87,8 @@ export const startCall = asyncHandler(async (req, res) => {
     // nothing, so the astrologer's time was given away for free. Reject
     // before any session/token exists at all.
     const availableBalance = Number(req.auth.walletAmount);
-    if (availableBalance < rateSnapshot) {
+    const hasFreeMinutes = Number(req.auth.freeMinutesRemaining) > 0;
+    if (!hasFreeMinutes && availableBalance < rateSnapshot) {
         throw new ApiError(402, "Insufficient balance to start this call");
     }
 
@@ -172,10 +173,15 @@ export const heartbeat = asyncHandler(async (req, res) => {
     // minute-rounding as the real billing math, and force-end the moment
     // the accrued cost exceeds what the customer actually has - so a call
     // can drain to exactly what's affordable but never run further for free.
-    const user = await User.findById(session.userId).select("walletAmount");
+    const user = await User.findById(session.userId).select("walletAmount freeMinutesRemaining");
     if (user) {
         const elapsedMinutes = Math.max(1, Math.ceil((session.lastHeartbeatAt.getTime() - session.startedAt.getTime()) / 60000));
-        const costSoFar = session.rateSnapshot * elapsedMinutes;
+        // Free minutes (the new-user promo, shared across chat/call/video)
+        // are applied before any rate math - they never generate a cost, so
+        // they're subtracted from the elapsed count up front.
+        const freeApplied = Math.min(elapsedMinutes, Number(user.freeMinutesRemaining) || 0);
+        const billableMinutes = elapsedMinutes - freeApplied;
+        const costSoFar = session.rateSnapshot * billableMinutes;
         const available = Number(user.walletAmount);
         if (costSoFar > available) {
             await finalizeSession(session, { endedBy: "insufficient_balance", reason: "Wallet exhausted mid-call" });

@@ -31,7 +31,7 @@ export async function billCallSession(session, { source = "unknown", dryRun = fa
     }
 
     const [user, vendor] = await Promise.all([
-        User.findById(session.userId).select("walletAmount"),
+        User.findById(session.userId).select("walletAmount freeMinutesRemaining"),
         Vendor.findById(session.vendorId).select("walletAmount commissionAmount callRate videoCallRate"),
     ]);
 
@@ -42,7 +42,15 @@ export async function billCallSession(session, { source = "unknown", dryRun = fa
 
     const rate = session.type === "video" ? vendor.videoCallRate : vendor.callRate;
     const minTime = Math.max(1, Math.ceil(session.durationSeconds / 60));
-    const minAmount = rate * minTime;
+
+    // New-user promo: free minutes are applied before any rate math runs, so
+    // the astrologer's 40/60 split below never pays out on the free portion
+    // (the platform absorbs it, not the astrologer) - decision confirmed
+    // with the client. `duration` on the Transaction stays the real total
+    // call length; only the money math is reduced.
+    const freeApplied = Math.min(minTime, Number(user.freeMinutesRemaining) || 0);
+    const billableMinutes = minTime - freeApplied;
+    const minAmount = rate * billableMinutes;
 
     const walletAmount = Number(user.walletAmount);
 
@@ -53,7 +61,7 @@ export async function billCallSession(session, { source = "unknown", dryRun = fa
     finalDeduction = Math.ceil(finalDeduction);
 
     logToFile(
-        `BILLING COMPUTED | session=${session._id} source=${source} rate=${rate} minTime=${minTime} minAmount=${minAmount} finalDeduction=${finalDeduction} dryRun=${dryRun}`,
+        `BILLING COMPUTED | session=${session._id} source=${source} rate=${rate} minTime=${minTime} freeApplied=${freeApplied} billableMinutes=${billableMinutes} minAmount=${minAmount} finalDeduction=${finalDeduction} dryRun=${dryRun}`,
         "trans"
     );
 
@@ -90,6 +98,7 @@ export async function billCallSession(session, { source = "unknown", dryRun = fa
 
     await User.findByIdAndUpdate(session.userId, {
         walletAmount: Math.max(0, walletAmount - finalDeduction).toFixed(2),
+        freeMinutesRemaining: (Number(user.freeMinutesRemaining) || 0) - freeApplied,
     });
     await Vendor.findByIdAndUpdate(session.vendorId, {
         walletAmount: vendor.walletAmount + finalDeduction * 0.4,
