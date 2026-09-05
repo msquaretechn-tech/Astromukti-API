@@ -28,6 +28,15 @@ const chatSchema = new Schema(
             type: Schema.Types.ObjectId,
             ref: "User",
         },
+        endedAt: {
+            type: Date,
+            default: null,
+        },
+        endedBy: {
+            type: String,
+            enum: ["user", "vendor"],
+            default: null,
+        },
     },
     { timestamps: true }
 );

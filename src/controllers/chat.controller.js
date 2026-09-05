@@ -236,6 +236,26 @@ export const searchAvailableUsers = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, users, "Users fetched successfully"));
 });
 
+export const endChat = asyncHandler(async (req, res) => {
+    const { chatId } = req.params;
+
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+        throw new ApiError(404, "Chat does not exist");
+    }
+    if (!chat.participants.some((p) => p.toString() === req.auth._id.toString())) {
+        throw new ApiError(403, "You are not a participant of this chat");
+    }
+
+    chat.endedAt = new Date();
+    chat.endedBy = req.auth.constructor.modelName === "Vendor" ? "vendor" : "user";
+    await chat.save();
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, chat, "Chat session ended"));
+});
+
 export const getAllChats = asyncHandler(async (req, res) => {
 
     console.log(req.auth);
