@@ -32,9 +32,15 @@ const finalizeSession = async (session, { endedBy, reason }) => {
     session.durationSeconds = durationSeconds;
     await session.save();
 
+    // Restore availability here too, not just activeCallSessionId - the app
+    // itself does this on a clean end (see leave()/_endCallSession() on both
+    // clients), but if the app crashed or was force-killed before it could
+    // run that cleanup, this was the only place the vendor could ever come
+    // back available again. Previously nothing did this server-side, so an
+    // abnormal disconnect left the vendor permanently unbookable.
     await Vendor.findOneAndUpdate(
         { _id: session.vendorId, activeCallSessionId: session._id },
-        { activeCallSessionId: null }
+        { activeCallSessionId: null, isAudioCallAvailable: true, isVideoCallAvailable: true, isChatAvailable: true, isNowAvailable: true }
     );
 
     logToFile(`END | session=${session._id} channel=${session.channelId} status=completed duration=${durationSeconds}s by=${endedBy}`, "call");
@@ -223,7 +229,7 @@ export const endCall = asyncHandler(async (req, res) => {
         await session.save();
         await Vendor.findOneAndUpdate(
             { _id: session.vendorId, activeCallSessionId: session._id },
-            { activeCallSessionId: null }
+            { activeCallSessionId: null, isAudioCallAvailable: true, isVideoCallAvailable: true, isChatAvailable: true, isNowAvailable: true }
         );
         logToFile(`END | session=${session._id} channel=${channelId} status=missed by=${endedBy}`, "call");
         return res.status(200).json(new ApiResponse(200, session, "Call ended"));

@@ -39,9 +39,11 @@ async function reapMissedRinging(now) {
         );
         if (!updated) continue;
 
+        // Restore availability, not just activeCallSessionId - see the
+        // matching comment in call.controller.js's finalizeSession().
         await Vendor.findOneAndUpdate(
             { _id: session.vendorId, activeCallSessionId: session._id },
-            { activeCallSessionId: null }
+            { activeCallSessionId: null, isAudioCallAvailable: true, isVideoCallAvailable: true, isChatAvailable: true, isNowAvailable: true }
         );
 
         logToFile(`MISSED | session=${session._id} channel=${session.channelId} - never connected, no billing`, 'call-reaper');
@@ -81,9 +83,11 @@ async function reapAbandonedOngoing(now) {
         );
         if (!updated) continue;
 
+        // Restore availability, not just activeCallSessionId - see the
+        // matching comment in call.controller.js's finalizeSession().
         await Vendor.findOneAndUpdate(
             { _id: session.vendorId, activeCallSessionId: session._id },
-            { activeCallSessionId: null }
+            { activeCallSessionId: null, isAudioCallAvailable: true, isVideoCallAvailable: true, isChatAvailable: true, isNowAvailable: true }
         );
 
         // findOneAndUpdate above returns the pre-update document (no
