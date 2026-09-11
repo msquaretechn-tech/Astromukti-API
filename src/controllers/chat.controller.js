@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { Chat } from '../models/chat.model.js';
 import { User } from '../models/user.model.js';
 import { Vendor } from '../models/vendor.model.js';
+import { VendorFreeMinutes } from '../models/vendorFreeMinutes.model.js';
+import { VENDOR_FREE_MINUTES_POOL } from '../services/CallBilling.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -130,9 +132,11 @@ export const createOrGetAOneOnOneChat = asyncHandler(async (req, res) => {
 
     // Check if it's a valid receiver
     let receiver = await User.findById(receiverId);
+    let receiverIsVendor = false;
 
     if (!receiver) {
         receiver = await Vendor.findById(receiverId);
+        receiverIsVendor = true;
     }
 
     if (!receiver) {
@@ -142,6 +146,28 @@ export const createOrGetAOneOnOneChat = asyncHandler(async (req, res) => {
     // check if receiver is not the user who is requesting a chat
     if (receiver._id.toString() === req.auth._id.toString()) {
         throw new ApiError(400, "You cannot chat with yourself");
+    }
+
+    // Server-side balance gate - unlike calls (call.controller.js's
+    // /api/call/start), chat had no equivalent check before this: billing
+    // only ever happened after the fact via self-reported duration in
+    // trans.controller.js, capped at whatever wallet existed (including
+    // ₹0) rather than ever refusing to bill. A customer with nothing
+    // available could open unlimited free chats. Reject here, before any
+    // chat thread is created, mirroring startCall's own gate exactly
+    // (same unit handling: freeMinutesRemaining/vendor free minutes are a
+    // minute-count bypass, not added arithmetically to the rupee wallet).
+    if (req.auth.constructor.modelName === "User" && receiverIsVendor) {
+        let vendorFreeAvailable = 0;
+        if (receiver.isFreeMinutesEnabled) {
+            const usage = await VendorFreeMinutes.findOne({ userId: req.auth._id, vendorId: receiver._id }).select("freeMinutesUsed");
+            vendorFreeAvailable = Math.max(0, VENDOR_FREE_MINUTES_POOL - (usage?.freeMinutesUsed || 0));
+        }
+        const hasFreeMinutes = Number(req.auth.freeMinutesRemaining) > 0 || vendorFreeAvailable >= 1;
+        const availableBalance = Number(req.auth.walletAmount);
+        if (!hasFreeMinutes && availableBalance < receiver.chatRate) {
+            throw new ApiError(402, "Insufficient balance to start this chat");
+        }
     }
 
     const chat = await Chat.aggregate([
