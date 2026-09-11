@@ -365,6 +365,7 @@ export const getVendorAvailability = asyncHandler(async (req, res) => {
             isVideoCallAvailable: 1,
             isPrivateCallAvailable: 1,
             isAnonymousCallAvailable: 1,
+            isFreeMinutesEnabled: 1,
         });
 
         return res.json(new ApiResponse(200, vendor, "Data fetched successfully"));
@@ -403,6 +404,40 @@ export const updateVendorAvailability = asyncHandler(async (req, res) => {
 
     return res.json(new ApiResponse(200, vendor, "Updated successfully"));
 
+});
+
+// PATCH /api/vendor/:vendorId/free-minutes - admin-only toggle for the
+// vendor-opt-in free-minutes promo. Deliberately checks the caller's
+// identity itself rather than relying only on verifyJWT, unlike
+// updateVendorAvailability above (which any valid user/vendor JWT can
+// already call - a pre-existing gap, out of scope here) - this one moves
+// real money, so it needs its own enforced check. Uses modelName rather
+// than req.auth.userType === "admin" (the AstroHanumanta sibling app's
+// pattern) because this app's verifyJWT never copies userType onto the
+// loaded admin doc - a separate pre-existing gap, flagged not fixed.
+export const setVendorFreeMinutesEnabled = asyncHandler(async (req, res) => {
+    if (req.auth.constructor.modelName !== "Admin") {
+        throw new ApiError(403, "Admin access required");
+    }
+
+    const { vendorId } = req.params;
+    const { enabled } = req.body;
+
+    if (typeof enabled !== "boolean") {
+        throw new ApiError(400, "enabled (boolean) is required");
+    }
+
+    const vendor = await Vendor.findByIdAndUpdate(
+        vendorId,
+        { isFreeMinutesEnabled: enabled },
+        { new: true, select: { isFreeMinutesEnabled: 1 } }
+    );
+
+    if (!vendor) {
+        throw new ApiError(404, "Vendor not found");
+    }
+
+    return res.json(new ApiResponse(200, { vendorId, isFreeMinutesEnabled: vendor.isFreeMinutesEnabled }, "Updated successfully"));
 });
 
 // Update Vendor Information

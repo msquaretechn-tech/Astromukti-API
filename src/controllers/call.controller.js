@@ -7,7 +7,8 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { mintRtcToken } from "../services/AgoraTokenGenerator.js";
 import { logToFile } from "../utils/logger.js";
-import { billCallSession } from "../services/CallBilling.js";
+import { billCallSession, VENDOR_FREE_MINUTES_POOL } from "../services/CallBilling.js";
+import { VendorFreeMinutes } from "../models/vendorFreeMinutes.model.js";
 
 const randomAgoraUid = () => crypto.randomInt(1, 2 ** 31 - 1);
 
@@ -70,7 +71,7 @@ export const startCall = asyncHandler(async (req, res) => {
     }
 
     const vendor = await Vendor.findById(vendorId).select(
-        "activeCallSessionId isOnline isAudioCallAvailable isVideoCallAvailable callRate videoCallRate"
+        "activeCallSessionId isOnline isAudioCallAvailable isVideoCallAvailable callRate videoCallRate isFreeMinutesEnabled"
     );
     if (!vendor) {
         throw new ApiError(404, "Vendor not found");
@@ -85,6 +86,16 @@ export const startCall = asyncHandler(async (req, res) => {
 
     const rateSnapshot = type === "audio" ? vendor.callRate : vendor.videoCallRate;
 
+    // How much of this vendor's free-minutes promo this user still has -
+    // snapshotted here (not re-read live in CallBilling.js) so an admin
+    // toggling Vendor.isFreeMinutesEnabled mid-call can't change the rules
+    // for a call already in progress.
+    let freeMinutesAvailableAtStart = 0;
+    if (vendor.isFreeMinutesEnabled) {
+        const usage = await VendorFreeMinutes.findOne({ userId: req.auth._id, vendorId }).select("freeMinutesUsed");
+        freeMinutesAvailableAtStart = Math.max(0, VENDOR_FREE_MINUTES_POOL - (usage?.freeMinutesUsed || 0));
+    }
+
     // Server-side balance gate - previously the only check was client-side
     // (the app's own wallet display deciding whether to let you tap "call"),
     // which the server never re-verified. A customer with nothing in their
@@ -93,7 +104,7 @@ export const startCall = asyncHandler(async (req, res) => {
     // nothing, so the astrologer's time was given away for free. Reject
     // before any session/token exists at all.
     const availableBalance = Number(req.auth.walletAmount);
-    const hasFreeMinutes = Number(req.auth.freeMinutesRemaining) > 0;
+    const hasFreeMinutes = Number(req.auth.freeMinutesRemaining) > 0 || freeMinutesAvailableAtStart >= 1;
     if (!hasFreeMinutes && availableBalance < rateSnapshot) {
         throw new ApiError(402, "Insufficient balance to start this call");
     }
@@ -109,6 +120,7 @@ export const startCall = asyncHandler(async (req, res) => {
         type,
         agoraUid: { user: userUid, vendor: vendorUid },
         rateSnapshot,
+        freeMinutesAvailableAtStart,
     });
 
     await Vendor.findByIdAndUpdate(vendorId, { activeCallSessionId: session._id });
@@ -157,7 +169,7 @@ export const heartbeat = asyncHandler(async (req, res) => {
     const { channelId } = req.params;
 
     const session = await CallSession.findOne({ channelId }).select(
-        "channelId userId vendorId type status startedAt lastHeartbeatAt rateSnapshot heartbeatCount"
+        "channelId userId vendorId type status startedAt lastHeartbeatAt rateSnapshot heartbeatCount freeMinutesAvailableAtStart"
     );
     if (!session) {
         throw new ApiError(404, "Call session not found");
@@ -182,11 +194,13 @@ export const heartbeat = asyncHandler(async (req, res) => {
     const user = await User.findById(session.userId).select("walletAmount freeMinutesRemaining");
     if (user) {
         const elapsedMinutes = Math.max(1, Math.ceil((session.lastHeartbeatAt.getTime() - session.startedAt.getTime()) / 60000));
-        // Free minutes (the new-user promo, shared across chat/call/video)
-        // are applied before any rate math - they never generate a cost, so
-        // they're subtracted from the elapsed count up front.
-        const freeApplied = Math.min(elapsedMinutes, Number(user.freeMinutesRemaining) || 0);
-        const billableMinutes = elapsedMinutes - freeApplied;
+        // Free minutes are applied before any rate math - they never
+        // generate a cost, so they're subtracted from the elapsed count up
+        // front. Vendor free-minutes promo (snapshotted at call start)
+        // first, then the new-user promo, matching CallBilling.js's order.
+        const vendorFreeApplied = Math.min(elapsedMinutes, session.freeMinutesAvailableAtStart || 0);
+        const freeApplied = Math.min(elapsedMinutes - vendorFreeApplied, Number(user.freeMinutesRemaining) || 0);
+        const billableMinutes = elapsedMinutes - vendorFreeApplied - freeApplied;
         const costSoFar = session.rateSnapshot * billableMinutes;
         const available = Number(user.walletAmount);
         if (costSoFar > available) {

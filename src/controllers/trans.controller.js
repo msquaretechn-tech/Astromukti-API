@@ -7,7 +7,8 @@ import { User } from '../models/user.model.js';
 import { Vendor } from '../models/vendor.model.js';
 import { CallSession } from '../models/callSession.model.js';
 import { logToFile } from '../utils/logger.js';
-import { billCallSession } from '../services/CallBilling.js';
+import { billCallSession, VENDOR_FREE_MINUTE_RATE, VENDOR_FREE_MINUTES_POOL } from '../services/CallBilling.js';
+import { VendorFreeMinutes } from '../models/vendorFreeMinutes.model.js';
 
 
 // Create Transaction
@@ -76,7 +77,8 @@ export const createTransaction = asyncHandler(async (req, res) => {
         commissionAmount: 1,
         callRate: 1,
         chatRate: 1,
-        videoCallRate: 1
+        videoCallRate: 1,
+        isFreeMinutesEnabled: 1
     });
 
     if (!user) {
@@ -134,14 +136,29 @@ export const createTransaction = asyncHandler(async (req, res) => {
 
     const minTime = Math.max(1, Math.ceil(duration));
 
+    // Vendor free-minutes promo (Vendor.isFreeMinutesEnabled), applied
+    // before the new-user promo below - chat has no server-tracked session
+    // to snapshot this onto (unlike audio/video, see CallBilling.js), so
+    // it's read fresh here, same trust level as every other value this
+    // self-reported billing path already relies on. Only applies to chat -
+    // the legacy (pre-CallSession) audio/video fallback below is untouched,
+    // matching this call's already-narrow scope.
+    let vendorFreeApplied = 0;
+    if (type === "chat" && vendor.isFreeMinutesEnabled && status === "success") {
+        const freeUsage = await VendorFreeMinutes.findOne({ userId, vendorId }).select("freeMinutesUsed");
+        const vendorFreeAvailable = Math.max(0, VENDOR_FREE_MINUTES_POOL - (freeUsage?.freeMinutesUsed || 0));
+        vendorFreeApplied = Math.min(minTime, vendorFreeAvailable);
+    }
+    const afterVendorFree = minTime - vendorFreeApplied;
+
     // New-user promo: 5 free minutes shared across chat/call/video, applied
     // before any rate math - the astrologer isn't paid for this portion, so
     // it's simplest to just shrink the billable minute count up front. This
     // is separate from (and unrelated to) the freePromoAmount reads/writes
     // below, which are pre-existing dead code (see AstroMukti-FINDINGS.md M6)
     // left untouched.
-    const freeMinutesApplied = Math.min(minTime, Number(user.freeMinutesRemaining) || 0);
-    const billableMinutes = minTime - freeMinutesApplied;
+    const freeMinutesApplied = Math.min(afterVendorFree, Number(user.freeMinutesRemaining) || 0);
+    const billableMinutes = afterVendorFree - freeMinutesApplied;
 
     // ================= AMOUNTS =================
 
@@ -211,12 +228,20 @@ export const createTransaction = asyncHandler(async (req, res) => {
         );
 
         await Vendor.findByIdAndUpdate(vendorId, {
-            walletAmount: vendor.walletAmount + finalDeduction * 0.4,
+            walletAmount: vendor.walletAmount + finalDeduction * 0.4 + vendorFreeApplied * VENDOR_FREE_MINUTE_RATE,
             commissionAmount: vendor.commissionAmount + finalDeduction * 0.6
         });
 
+        if (vendorFreeApplied > 0) {
+            await VendorFreeMinutes.findOneAndUpdate(
+                { userId, vendorId },
+                { $inc: { freeMinutesUsed: vendorFreeApplied } },
+                { upsert: true }
+            );
+        }
+
         logToFile(
-            `🟢 VENDOR UPDATED | vendorEarned=${finalDeduction * 0.4}, commission=${finalDeduction * 0.6}`,
+            `🟢 VENDOR UPDATED | vendorEarned=${finalDeduction * 0.4}, commission=${finalDeduction * 0.6}, vendorFreeApplied=${vendorFreeApplied}`,
             "trans"
         );
     }
@@ -230,7 +255,8 @@ export const createTransaction = asyncHandler(async (req, res) => {
         amount: Math.ceil(finalDeduction),
         type,
         duration: minTime,
-        description
+        description,
+        vendorFreeMinutesApplied: vendorFreeApplied,
     });
 
     const execTime = Date.now() - startTime;

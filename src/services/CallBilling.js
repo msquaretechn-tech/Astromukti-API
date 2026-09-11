@@ -1,7 +1,15 @@
 import { User } from "../models/user.model.js";
 import { Vendor } from "../models/vendor.model.js";
 import { TransactionModel } from "../models/trans.model.js";
+import { VendorFreeMinutes } from "../models/vendorFreeMinutes.model.js";
 import { logToFile } from "../utils/logger.js";
+
+// Flat rate the platform pays a vendor for a minute covered by their
+// free-minutes promo (Vendor.isFreeMinutesEnabled) - unconditional, not a
+// share of anything the customer paid, since the customer pays ₹0 for that
+// minute. See VendorFreeMinutes.
+export const VENDOR_FREE_MINUTE_RATE = 1;
+export const VENDOR_FREE_MINUTES_POOL = 5;
 
 // The single source of truth for billing a completed call session, ported
 // from the sibling AstroHanumanta codebase's CallBilling.js. Unlike there,
@@ -43,13 +51,22 @@ export async function billCallSession(session, { source = "unknown", dryRun = fa
     const rate = session.type === "video" ? vendor.videoCallRate : vendor.callRate;
     const minTime = Math.max(1, Math.ceil(session.durationSeconds / 60));
 
+    // Vendor free-minutes promo, applied first - covers whichever of this
+    // call's minutes were still available in the pool when it started
+    // (session.freeMinutesAvailableAtStart, snapshotted in startCall so a
+    // mid-call admin toggle can't change the rules partway through). Kept
+    // separate from the new-user promo below so a vendor-funded promo never
+    // eats into the customer's own separately-earned freeMinutesRemaining.
+    const vendorFreeApplied = Math.min(minTime, session.freeMinutesAvailableAtStart || 0);
+    const afterVendorFree = minTime - vendorFreeApplied;
+
     // New-user promo: free minutes are applied before any rate math runs, so
     // the astrologer's 40/60 split below never pays out on the free portion
     // (the platform absorbs it, not the astrologer) - decision confirmed
     // with the client. `duration` on the Transaction stays the real total
     // call length; only the money math is reduced.
-    const freeApplied = Math.min(minTime, Number(user.freeMinutesRemaining) || 0);
-    const billableMinutes = minTime - freeApplied;
+    const freeApplied = Math.min(afterVendorFree, Number(user.freeMinutesRemaining) || 0);
+    const billableMinutes = afterVendorFree - freeApplied;
     const minAmount = rate * billableMinutes;
 
     const walletAmount = Number(user.walletAmount);
@@ -85,6 +102,7 @@ export async function billCallSession(session, { source = "unknown", dryRun = fa
             amount: finalDeduction,
             type: session.type,
             duration: minTime,
+            vendorFreeMinutesApplied: vendorFreeApplied,
             callSessionId: session._id,
         });
     } catch (err) {
@@ -101,10 +119,18 @@ export async function billCallSession(session, { source = "unknown", dryRun = fa
         freeMinutesRemaining: (Number(user.freeMinutesRemaining) || 0) - freeApplied,
     });
     await Vendor.findByIdAndUpdate(session.vendorId, {
-        walletAmount: vendor.walletAmount + finalDeduction * 0.4,
+        walletAmount: vendor.walletAmount + finalDeduction * 0.4 + vendorFreeApplied * VENDOR_FREE_MINUTE_RATE,
         commissionAmount: vendor.commissionAmount + finalDeduction * 0.6,
     });
 
-    logToFile(`BILLED | session=${session._id} source=${source} tx=${transaction._id} amount=${finalDeduction}`, "trans");
+    if (vendorFreeApplied > 0) {
+        await VendorFreeMinutes.findOneAndUpdate(
+            { userId: session.userId, vendorId: session.vendorId },
+            { $inc: { freeMinutesUsed: vendorFreeApplied } },
+            { upsert: true }
+        );
+    }
+
+    logToFile(`BILLED | session=${session._id} source=${source} tx=${transaction._id} amount=${finalDeduction} vendorFreeApplied=${vendorFreeApplied}`, "trans");
     return { billed: true, alreadyBilled: false, transaction, reason: null, amount: finalDeduction, minTime, rate };
 }

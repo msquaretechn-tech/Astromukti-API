@@ -36,6 +36,14 @@ const callSessionSchema = new Schema(
             type: Number,
             required: true,
         },
+        // How many of this vendor's free-promo minutes (0-5) were still
+        // available for this user when the call started - snapshotted so an
+        // admin toggling Vendor.isFreeMinutesEnabled mid-call can't change
+        // the billing rules for a call already in progress. See CallBilling.js.
+        freeMinutesAvailableAtStart: {
+            type: Number,
+            default: 0,
+        },
         ringingAt: {
             type: Date,
             default: Date.now,

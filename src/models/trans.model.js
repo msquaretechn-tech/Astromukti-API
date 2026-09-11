@@ -31,6 +31,15 @@ const transactionSchema = new Schema({
         type: Number,
         required: true
     },
+    // How many of this transaction's minutes were covered by a vendor's
+    // free-promo pool (Vendor.isFreeMinutesEnabled) rather than paid by the
+    // customer - 0 for ordinary transactions. Separate from
+    // User.freeMinutesRemaining (the existing new-user promo). Lets the
+    // admin dashboard report total promo payout without a separate ledger.
+    vendorFreeMinutesApplied: {
+        type: Number,
+        default: 0
+    },
     // Links a transaction to the server-tracked call session that produced
     // it. Unique + sparse: only call-billed transactions set this, and the
     // uniqueness is what makes billing a session idempotent - the first

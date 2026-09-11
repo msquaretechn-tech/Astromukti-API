@@ -22,6 +22,7 @@ import {
     isUserInWaitingList,
     getVendorAvailability,
     updateVendorAvailability,
+    setVendorFreeMinutesEnabled,
     getMyActivity,
     blockUser,
     unBlockUser,
@@ -115,8 +116,11 @@ router.route('/check-availability/:vendorId')
 router.route('/update-availability/:vendorId')
     .post(verifyJWT, updateVendorAvailability);
 
+router.route('/:vendorId/free-minutes')
+    .patch(verifyJWT, setVendorFreeMinutesEnabled);
 
-// Vendor 
+
+// Vendor
 router.route("/")
     .get(getVendor)
     .post(

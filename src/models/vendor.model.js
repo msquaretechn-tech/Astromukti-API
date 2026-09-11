@@ -167,6 +167,15 @@ const vendorSchema = new Schema({
         type: Boolean,
         default: true
     },
+    // Admin-controlled promo lever (set via PATCH /api/vendor/:vendorId/free-minutes).
+    // When true, each new customer gets a one-time 5-minute free pool with
+    // this vendor, paid out to the vendor at a flat rate instead of the
+    // usual split - see VendorFreeMinutes and CallBilling.js. Separate from
+    // (and applied before) the existing User.freeMinutesRemaining promo.
+    isFreeMinutesEnabled: {
+        type: Boolean,
+        default: false
+    },
     // Set while a server-tracked call session is ringing/ongoing for this
     // vendor, cleared the moment it ends. Doubles as a lock preventing a
     // second call from being started against a vendor already on one.
