@@ -62,12 +62,17 @@ const chatCommonAggregation = () => {
             }
         },
         {
-            // lookup for the participants present
+            // lookup for the chat's admin (the id of whoever created it) -
+            // looked up against both users and vendors, same as the
+            // participants lookup above, since either side can be the
+            // creator. Previously this only checked "users", so any chat
+            // an astrologer initiated (admin = a vendor id) resolved to
+            // null here - the app then crashed indexing into it.
             $lookup: {
                 from: "users",
                 foreignField: "_id",
                 localField: "admin",
-                as: "admin",
+                as: "adminUser",
                 pipeline: [
                     {
                         $project: {
@@ -83,6 +88,14 @@ const chatCommonAggregation = () => {
             },
         },
         {
+            $lookup: {
+                from: "vendors",
+                foreignField: "_id",
+                localField: "admin",
+                as: "adminVendor",
+            },
+        },
+        {
             // lookup for the group chats
             $lookup: {
                 from: "chatmessages",
@@ -91,12 +104,14 @@ const chatCommonAggregation = () => {
                 as: "lastMessage",
                 pipeline: [
                     {
-                        // get details of the sender
+                        // get details of the sender - same fix as admin
+                        // above: a message can be sent by either side, so
+                        // this has to check vendors too, not just users.
                         $lookup: {
                             from: "users",
                             foreignField: "_id",
                             localField: "sender",
-                            as: "sender",
+                            as: "senderUser",
                             pipeline: [
                                 {
                                     $project: {
@@ -109,19 +124,51 @@ const chatCommonAggregation = () => {
                         },
                     },
                     {
+                        $lookup: {
+                            from: "vendors",
+                            foreignField: "_id",
+                            localField: "sender",
+                            as: "senderVendor",
+                            pipeline: [
+                                {
+                                    $project: {
+                                        name: 1,
+                                        avatar: 1,
+                                        email: 1,
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                    {
                         $addFields: {
-                            sender: { $first: "$sender" },
+                            sender: { $first: { $concatArrays: ["$senderUser", "$senderVendor"] } },
+                        },
+                    },
+                    {
+                        $project: {
+                            senderUser: 0,
+                            senderVendor: 0,
                         },
                     },
                 ],
             },
         },
         {
+            // Single $addFields stage covering both fields - previously
+            // this was written as two separate `$addFields` keys in the
+            // same object literal, which is invalid: the second silently
+            // overwrote the first, so lastMessage never actually got
+            // unwrapped from its lookup array into a single object.
             $addFields: {
                 lastMessage: { $first: "$lastMessage" },
+                admin: { $first: { $concatArrays: ["$adminUser", "$adminVendor"] } },
             },
-            $addFields: {
-                admin: { $first: "$admin" },
+        },
+        {
+            $project: {
+                adminUser: 0,
+                adminVendor: 0,
             },
         },
     ];
