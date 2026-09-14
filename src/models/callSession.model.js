@@ -44,6 +44,15 @@ const callSessionSchema = new Schema(
             type: Number,
             default: 0,
         },
+        // Whether this vendor had the free-minutes promo enabled when the
+        // call started - snapshotted for the same reason as the field
+        // above, so the general new-signup promo (User.freeMinutesRemaining)
+        // can be gated by it in heartbeat/CallBilling.js without re-reading
+        // the live vendor flag mid-call.
+        vendorFreeMinutesEnabledAtStart: {
+            type: Boolean,
+            default: false,
+        },
         ringingAt: {
             type: Date,
             default: Date.now,

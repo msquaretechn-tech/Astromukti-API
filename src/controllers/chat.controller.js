@@ -210,7 +210,11 @@ export const createOrGetAOneOnOneChat = asyncHandler(async (req, res) => {
             const usage = await VendorFreeMinutes.findOne({ userId: req.auth._id, vendorId: receiver._id }).select("freeMinutesUsed");
             vendorFreeAvailable = Math.max(0, VENDOR_FREE_MINUTES_POOL - (usage?.freeMinutesUsed || 0));
         }
-        const hasFreeMinutes = Number(req.auth.freeMinutesRemaining) > 0 || vendorFreeAvailable >= 1;
+        // The general new-signup promo only counts for a vendor the admin
+        // has enabled - same gate as the vendor-specific pool above.
+        const hasFreeMinutes =
+            (receiver.isFreeMinutesEnabled && Number(req.auth.freeMinutesRemaining) > 0) ||
+            vendorFreeAvailable >= 1;
         const availableBalance = Number(req.auth.walletAmount);
         if (!hasFreeMinutes && availableBalance < receiver.chatRate) {
             throw new ApiError(402, "Insufficient balance to start this chat");

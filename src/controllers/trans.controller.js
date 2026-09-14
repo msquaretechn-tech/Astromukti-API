@@ -156,8 +156,12 @@ export const createTransaction = asyncHandler(async (req, res) => {
     // it's simplest to just shrink the billable minute count up front. This
     // is separate from (and unrelated to) the freePromoAmount reads/writes
     // below, which are pre-existing dead code (see AstroMukti-FINDINGS.md M6)
-    // left untouched.
-    const freeMinutesApplied = Math.min(afterVendorFree, Number(user.freeMinutesRemaining) || 0);
+    // left untouched. Only applies for a vendor with the promo enabled -
+    // same gate as the vendor-specific pool above, so an astrologer who
+    // never opted in never gives away free time either.
+    const freeMinutesApplied = vendor.isFreeMinutesEnabled
+        ? Math.min(afterVendorFree, Number(user.freeMinutesRemaining) || 0)
+        : 0;
     const billableMinutes = afterVendorFree - freeMinutesApplied;
 
     // ================= AMOUNTS =================

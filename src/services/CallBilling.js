@@ -64,8 +64,13 @@ export async function billCallSession(session, { source = "unknown", dryRun = fa
     // the astrologer's 40/60 split below never pays out on the free portion
     // (the platform absorbs it, not the astrologer) - decision confirmed
     // with the client. `duration` on the Transaction stays the real total
-    // call length; only the money math is reduced.
-    const freeApplied = Math.min(afterVendorFree, Number(user.freeMinutesRemaining) || 0);
+    // call length; only the money math is reduced. Only applies for a
+    // vendor that had the promo enabled when the call started - an
+    // astrologer who never opted in never gives away free time, same as
+    // the vendor-specific pool above.
+    const freeApplied = session.vendorFreeMinutesEnabledAtStart
+        ? Math.min(afterVendorFree, Number(user.freeMinutesRemaining) || 0)
+        : 0;
     const billableMinutes = afterVendorFree - freeApplied;
     const minAmount = rate * billableMinutes;
 

@@ -104,7 +104,12 @@ export const startCall = asyncHandler(async (req, res) => {
     // nothing, so the astrologer's time was given away for free. Reject
     // before any session/token exists at all.
     const availableBalance = Number(req.auth.walletAmount);
-    const hasFreeMinutes = Number(req.auth.freeMinutesRemaining) > 0 || freeMinutesAvailableAtStart >= 1;
+    // The general new-signup promo (freeMinutesRemaining) only counts for
+    // astrologers the admin has specifically enabled - same gate as the
+    // vendor-specific pool above, not a free pass for every astrologer.
+    const hasFreeMinutes =
+        (vendor.isFreeMinutesEnabled && Number(req.auth.freeMinutesRemaining) > 0) ||
+        freeMinutesAvailableAtStart >= 1;
     if (!hasFreeMinutes && availableBalance < rateSnapshot) {
         throw new ApiError(402, "Insufficient balance to start this call");
     }
@@ -121,6 +126,7 @@ export const startCall = asyncHandler(async (req, res) => {
         agoraUid: { user: userUid, vendor: vendorUid },
         rateSnapshot,
         freeMinutesAvailableAtStart,
+        vendorFreeMinutesEnabledAtStart: vendor.isFreeMinutesEnabled,
     });
 
     await Vendor.findByIdAndUpdate(vendorId, { activeCallSessionId: session._id });
@@ -169,7 +175,7 @@ export const heartbeat = asyncHandler(async (req, res) => {
     const { channelId } = req.params;
 
     const session = await CallSession.findOne({ channelId }).select(
-        "channelId userId vendorId type status startedAt lastHeartbeatAt rateSnapshot heartbeatCount freeMinutesAvailableAtStart"
+        "channelId userId vendorId type status startedAt lastHeartbeatAt rateSnapshot heartbeatCount freeMinutesAvailableAtStart vendorFreeMinutesEnabledAtStart"
     );
     if (!session) {
         throw new ApiError(404, "Call session not found");
@@ -199,7 +205,11 @@ export const heartbeat = asyncHandler(async (req, res) => {
         // front. Vendor free-minutes promo (snapshotted at call start)
         // first, then the new-user promo, matching CallBilling.js's order.
         const vendorFreeApplied = Math.min(elapsedMinutes, session.freeMinutesAvailableAtStart || 0);
-        const freeApplied = Math.min(elapsedMinutes - vendorFreeApplied, Number(user.freeMinutesRemaining) || 0);
+        // The general promo only ever applies for a vendor that had the
+        // promo enabled when this call started (see vendorFreeMinutesEnabledAtStart).
+        const freeApplied = session.vendorFreeMinutesEnabledAtStart
+            ? Math.min(elapsedMinutes - vendorFreeApplied, Number(user.freeMinutesRemaining) || 0)
+            : 0;
         const billableMinutes = elapsedMinutes - vendorFreeApplied - freeApplied;
         const costSoFar = session.rateSnapshot * billableMinutes;
         const available = Number(user.walletAmount);
