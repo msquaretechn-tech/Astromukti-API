@@ -3,7 +3,7 @@ import { Chat } from '../models/chat.model.js';
 import { User } from '../models/user.model.js';
 import { Vendor } from '../models/vendor.model.js';
 import { VendorFreeMinutes } from '../models/vendorFreeMinutes.model.js';
-import { VENDOR_FREE_MINUTES_POOL } from '../services/CallBilling.js';
+import { VENDOR_FREE_MINUTES_POOL, computeTotalRemainingMinutes } from '../services/CallBilling.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -204,6 +204,13 @@ export const createOrGetAOneOnOneChat = asyncHandler(async (req, res) => {
     // chat thread is created, mirroring startCall's own gate exactly
     // (same unit handling: freeMinutesRemaining/vendor free minutes are a
     // minute-count bypass, not added arithmetically to the rupee wallet).
+    // Real total minutes this chat could actually run for, for the app to
+    // seed its countdown display with instead of its own guess (which can't
+    // see the vendor-specific pool at all - see AstroMukti-FINDINGS.md
+    // 2026-09-15). Only meaningful when a customer is chatting with a
+    // vendor - null otherwise, matching the gate below's own scope.
+    let totalRemainingMinute = null;
+
     if (req.auth.constructor.modelName === "User" && receiverIsVendor) {
         let vendorFreeAvailable = 0;
         if (receiver.isFreeMinutesEnabled) {
@@ -219,6 +226,8 @@ export const createOrGetAOneOnOneChat = asyncHandler(async (req, res) => {
         if (!hasFreeMinutes && availableBalance < receiver.chatRate) {
             throw new ApiError(402, "Insufficient balance to start this chat");
         }
+
+        totalRemainingMinute = await computeTotalRemainingMinutes(req.auth, receiver, receiver.chatRate);
     }
 
     const chat = await Chat.aggregate([
@@ -245,7 +254,7 @@ export const createOrGetAOneOnOneChat = asyncHandler(async (req, res) => {
         // if we find the chat that means user already has created a chat
         return res
             .status(200)
-            .json(new ApiResponse(200, chat[0], "Chat retrieved successfully"));
+            .json(new ApiResponse(200, { ...chat[0], totalRemainingMinute }, "Chat retrieved successfully"));
     }
 
     // if not we need to create a new one on one chat
@@ -286,7 +295,7 @@ export const createOrGetAOneOnOneChat = asyncHandler(async (req, res) => {
 
     return res
         .status(201)
-        .json(new ApiResponse(201, payload, "Chat retrieved successfully"));
+        .json(new ApiResponse(201, { ...payload, totalRemainingMinute }, "Chat retrieved successfully"));
 });
 
 

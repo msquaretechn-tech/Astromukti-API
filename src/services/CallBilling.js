@@ -11,6 +11,24 @@ import { logToFile } from "../utils/logger.js";
 export const VENDOR_FREE_MINUTE_RATE = 1;
 export const VENDOR_FREE_MINUTES_POOL = 5;
 
+// Computes the true total minutes a (user, vendor) pair could still get for a
+// session billed at `rate` right now - vendor promo pool (if enabled) + the
+// general new-signup promo (only counts when this vendor has the promo
+// enabled, see AstroMukti-FINDINGS.md 2026-09-14) + whatever the wallet alone
+// affords. Used to seed the customer/astrologer's local countdown timers with
+// a real number - the client's own guess has no visibility into the
+// vendor-specific pool at all, which is what made that display wrong.
+export async function computeTotalRemainingMinutes(user, vendor, rate) {
+    let vendorPoolRemaining = 0;
+    if (vendor.isFreeMinutesEnabled) {
+        const usage = await VendorFreeMinutes.findOne({ userId: user._id, vendorId: vendor._id }).select("freeMinutesUsed");
+        vendorPoolRemaining = Math.max(0, VENDOR_FREE_MINUTES_POOL - (usage?.freeMinutesUsed || 0));
+    }
+    const generalPoolRemaining = vendor.isFreeMinutesEnabled ? Number(user.freeMinutesRemaining || 0) : 0;
+    const walletMinutes = Math.floor(Number(user.walletAmount || 0) / rate);
+    return vendorPoolRemaining + generalPoolRemaining + walletMinutes;
+}
+
 // The single source of truth for billing a completed call session, ported
 // from the sibling AstroHanumanta codebase's CallBilling.js. Unlike there,
 // this app's User model has no free-promo-balance concept at all - the

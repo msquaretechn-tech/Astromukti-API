@@ -7,7 +7,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { mintRtcToken } from "../services/AgoraTokenGenerator.js";
 import { logToFile } from "../utils/logger.js";
-import { billCallSession, VENDOR_FREE_MINUTES_POOL } from "../services/CallBilling.js";
+import { billCallSession, computeTotalRemainingMinutes, VENDOR_FREE_MINUTES_POOL } from "../services/CallBilling.js";
 import { VendorFreeMinutes } from "../models/vendorFreeMinutes.model.js";
 
 const randomAgoraUid = () => crypto.randomInt(1, 2 ** 31 - 1);
@@ -134,6 +134,11 @@ export const startCall = asyncHandler(async (req, res) => {
     const expireSeconds = 3600;
     const rtcToken = mintRtcToken({ channelName: channelId, uid: userUid, role: "publisher", tokenType: "uid", expireSeconds });
 
+    // Real total minutes this call could actually run, for the app to seed
+    // its countdown display with instead of its own guess (which can't see
+    // the vendor-specific pool at all - see AstroMukti-FINDINGS.md 2026-09-15).
+    const totalRemainingMinute = await computeTotalRemainingMinutes(req.auth, vendor, rateSnapshot);
+
     logToFile(`START | session=${session._id} channel=${channelId} user=${req.auth._id} vendor=${vendorId} type=${type}`, "call");
 
     return res.status(201).json(new ApiResponse(201, {
@@ -142,6 +147,7 @@ export const startCall = asyncHandler(async (req, res) => {
         rtcToken,
         agoraUid: userUid,
         expiresAt: Date.now() + expireSeconds * 1000,
+        totalRemainingMinute,
     }, "Call started"));
 });
 
